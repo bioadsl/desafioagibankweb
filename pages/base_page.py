@@ -140,20 +140,153 @@ class BasePage:
         self._wait_cloudflare_bypass(max_attempts=4, wait_ms=2000)
         el = self._apply_locator(locator)
         el.wait_for(state="visible", timeout=30000)
-        el.click()
+        try:
+            el.click()
+        except Exception:
+            # fallback: scroll + click force
+            try:
+                el.scroll_into_view_if_needed(timeout=5000)
+                el.click(force=True)
+            except Exception:
+                # ultimo recurso: click via evaluate (força evento DOM mesmo offscreen)
+                el.evaluate("e => e.click()")
 
     def fill_input(self, locator, value):
         self._wait_cloudflare_bypass(max_attempts=4, wait_ms=2000)
         el = self._apply_locator(locator)
         el.wait_for(state="visible", timeout=30000)
-        el.click()
-        el.fill(value)
+        try:
+            el.click()
+        except Exception:
+            try:
+                el.scroll_into_view_if_needed(timeout=5000)
+                el.click(force=True)
+            except Exception:
+                pass
+
+        valor_br = str(value).strip()
+        # Tentativa 1: fill nativo (bom para type=number, sem mascara)
+        #    (mas inputs com IMask/Cleave truncam -> usam fallback abaixo)
+        try:
+            el.fill(valor_br)
+        except Exception:
+            pass
+        # Confirmar: valor input_value bate?
+        try:
+            atual = (el.input_value() or "").strip()
+            valor_br_numerico = "".join(ch for ch in valor_br if ch.isdigit() or ch in ",.-")
+            atual_numerico = "".join(ch for ch in atual if ch.isdigit() or ch in ",.-")
+            # Se numerico bate (ou foi zerado e queremos numero !=0), usar type fallback
+            if (valor_br_numerico and valor_br_numerico not in atual_numerico) or (
+                valor_br and not atual and valor_br not in "0"
+            ):
+                raise RuntimeError("fill nao funcionou: fallback mascara")
+            # OK: bateu
+            return
+        except Exception:
+            pass
+
+        # FALLBACK para MASCARA (moeda/porcentagem BR): normaliza decimal
+        # Converte '.' -> ',' pt-BR, limpa com Ctrl+A + type(char a char delay)
+        def _normalize(v):
+            """
+            Converte numeros para formato BR com 2 casas decimais OBRIGATORIAS
+            (a mascara da calculadora interpreta N digitos como CENTAVOS).
+
+            Exemplos:
+                10000     -> '10000,00'   (R$10mil = 10000 reais e 00 centavos)
+                '2.5'     -> '2,50'       (2,5% a.m.)
+                2.5       -> '2,50'
+                '2'       -> '2,00'
+                24        -> '24'         (inteiro sem decimal -> type number, nesse caso passa fill normal)
+                '10000,00' -> '10000,00'  (ja formatado)
+                '1.000,50' -> '1000,50'   (mantem, ja BR)
+            """
+            # 1) Numeros puros:
+            if isinstance(v, (int, float)):
+                if isinstance(v, float):
+                    # float: formata 2 casas
+                    return f"{v:.2f}".replace(".", ",")
+                # Inteiro: adiciona ,00 a menos que seja prazo/meses (que geralmente pequeno)
+                if 0 <= v <= 9999:
+                    # Inteiros pequenos podem ser meses/prazo -> mantem. A mascara
+                    # de moeda se der errado vai cair no fill_input normal.
+                    return f"{v},00"
+                return f"{v},00"
+            s = str(v).strip()
+            if not s:
+                return s
+            tem_v = "," in s
+            tem_p = "." in s
+
+            # Ja pt-BR e ja tem virgula: garantir 2 casas apos virgula
+            if tem_v and not tem_p:
+                antes, _, depois = s.partition(",")
+                depois = (depois + "00")[:2]
+                antes = antes.replace(".", "")  # remove separador de milhar
+                return f"{antes},{depois}"
+
+            # So ponto e sem virgula: decimal en-US
+            if tem_p and not tem_v:
+                # >1 pontos = separador de milhar (ex: 1.000.000) = inteiro
+                if s.count(".") > 1:
+                    return s.replace(".", "") + ",00"
+                # 1 ponto = decimal (ex: 1234.56 ou 2.5)
+                antes, _, depois = s.partition(".")
+                depois = (depois + "00")[:2]
+                return f"{antes},{depois}"
+
+            # Misto (, e .) = en-US com separador de milhar (1,234.56 -> pt-BR 1234,56)
+            if tem_p and tem_v:
+                s2 = s.replace(".", "#TEMP#").replace(",", ".").replace("#TEMP#", ",")
+                return _normalize(s2)
+
+            # So digitos (sem separador nenhum)
+            if s.isdigit():
+                # Inteiro puro: garantir ,00
+                return f"{s},00"
+            return s
+
+        v_br = _normalize(value)
+        try:
+            el.press("Control+A")
+            el.press("Delete")
+        except Exception:
+            pass
+        try:
+            el.press("Control+A")
+            el.press("Backspace")
+        except Exception:
+            pass
+        try:
+            el.fill("")
+        except Exception:
+            pass
+        # type com delay (garante mascara capturar cada tecla)
+        el.type(v_br, delay=60)
 
     def select_dropdown(self, locator, value):
         self._wait_cloudflare_bypass(max_attempts=4, wait_ms=2000)
         el = self._apply_locator(locator)
         el.wait_for(state="visible", timeout=30000)
-        el.select_option(value)
+        try:
+            el.select_option(value)
+        except Exception:
+            # fallback: tenta por label/value exato ou por texto
+            try:
+                el.select_option(label=value)
+            except Exception:
+                try:
+                    el.select_option(value=str(value))
+                except Exception:
+                    # Ultimo recurso: simular clicks
+                    try:
+                        el.click()
+                        opt = el.locator(f"option:has-text('{value}')").first
+                        if opt.count() > 0:
+                            opt.click()
+                    except Exception as err:
+                        raise err
 
     def get_text(self, locator):
         el = self._apply_locator(locator)

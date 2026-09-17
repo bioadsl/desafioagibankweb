@@ -49,8 +49,14 @@ def browser(playwright_instance):
 
 @pytest.fixture(scope="function")
 def context(browser):
+    headless = os.getenv("HEADLESS", "true").lower() == "true"
+    # Quando solicitado maximizado (HEADED), passar viewport=None para
+    # respeitar --start-maximized. No headless, viewport tem que ser fixo.
+    viewport_cfg = None if (not headless) else {"width": 1920, "height": 1080}
+
     context = browser.new_context(
-        viewport={"width": 1920, "height": 1080},
+        viewport=viewport_cfg,
+        no_viewport=(not headless),  # Chrome nativo maximizado
         locale="pt-BR",
         timezone_id="America/Sao_Paulo",
         user_agent=CHROME_UA,

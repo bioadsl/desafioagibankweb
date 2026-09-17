@@ -54,10 +54,10 @@ class CalculadoraJurosCompostosPage(BasePage):
     ]
 
     INPUT_VALOR_INICIAL = [
-        '#valorInicial',
+        '#formDivida #valorEmprestimo',
         '#valorEmprestimo',
         '#formInvestimento #valorInicial',
-        '#formDivida #valorEmprestimo',
+        '#valorInicial',
         'input[name*="valor_inicial"]',
         'input[name*="valor-inicial"]',
         'input[name*="capital"]',
@@ -70,6 +70,7 @@ class CalculadoraJurosCompostosPage(BasePage):
         'input[id*="principal"]',
         'input[placeholder*="Valor Inicial"]',
         'input[placeholder*="valor inicial"]',
+        'input[placeholder*="Empréstimo"]',
         'input[placeholder*="R$"]',
         'input[aria-label*="Valor Inicial"]',
         'input[aria-label*="valor inicial"]',
@@ -392,20 +393,110 @@ class CalculadoraJurosCompostosPage(BasePage):
 
     def _swap_active_context(self, ctx):
         """
-        Faz um patch temporário: métodos que usam self.page.* agora devem
-        preferir ctx se for frame. Como métodos herdados (click_element,
-        fill_input, etc) usam self.page, nós criamos uma Wrapper Page-like
-        e substituímos self.page APENAS enquanto interagimos com a
-        calculadora (mas isso é arriscado).
+        Guarda self.page original e substitui por ctx (Frame) para que
+        os métodos herdados de BasePage (click_element, fill_input, etc)
+        atuem no CONTEXTO CORRETO (iframe) invés de no top-level page.
 
-        SOLUCAO MAIS SEGURA: criamos métodos de clique/escrita SOBRESCRITOS
-        nesta classe que usam _active_page() diretamente.
+        self._page_orig = backup da original.
         """
-        pass
+        if not getattr(self, "_page_orig", None):
+            self._page_orig = self.page
+        self.page = ctx or self._page_orig
+
+    def _restore_top_context(self):
+        if getattr(self, "_page_orig", None):
+            self.page = self._page_orig
 
     # ======================================================================
     # HELPERS LOCAIS que usam _active_page() (sem depender de self.page herdado)
     # ======================================================================
+    @staticmethod
+    def _normalizar_decimal_ptbr(valor, duas_casas=True):
+        """
+        Converte entradas numericas para formato pt-BR.
+        SE duas_casas=True: formata COM VÍRGULA + 2 casas decimais FIXAS (para MÁSCARAS
+        de moeda/porcentagem que tratam digitos sem vírgula como CENTAVOS).
+        Exemplos:
+            10000          -> '10000,00'  (R$ 10.000,00)
+            '2.5'          -> '2,50'
+            '10000'        -> '10000,00'
+            '24' (prazo)   -> '24'        (se duas_casas=False)
+            10000 (prazo)  -> '10000'     (se duas_casas=False)
+        """
+        if isinstance(valor, (int, float)):
+            if isinstance(valor, float):
+                s = f"{valor:.2f}".replace(".", ",") if duas_casas else f"{valor:.10f}".rstrip("0").rstrip(".").replace(".", ",")
+                return s
+            if duas_casas:
+                return f"{valor},00"
+            return str(valor)
+        s = str(valor).strip()
+        if not s:
+            return s
+        tem_virgula = "," in s
+        tem_ponto = "." in s
+        if tem_virgula and not tem_ponto:
+            if duas_casas:
+                antes, _, depois = s.partition(",")
+                depois = (depois + "00")[:2]
+                antes = antes.replace(".", "")
+                return f"{antes},{depois}"
+            return s
+        if tem_ponto and not tem_virgula:
+            if s.count(".") > 1:
+                return s.replace(".", "") + (",00" if duas_casas else "")
+            antes, _, depois = s.partition(".")
+            if duas_casas:
+                depois = (depois + "00")[:2]
+                return f"{antes},{depois}"
+            return s.replace(".", ",")
+        if tem_virgula and tem_ponto:
+            s2 = s.replace(".", "#TEMP#").replace(",", ".").replace("#TEMP#", ",")
+            return CalculadoraJurosCompostosPage._normalizar_decimal_ptbr(s2, duas_casas=duas_casas)
+        if s.isdigit() and duas_casas:
+            return f"{s},00"
+        return s
+
+    def _preencher_com_mascara_br(self, locator_element, valor, delay_ms=60):
+        """
+        Preenche input com máscara brasileira (R$, %, etc).
+        Máscaras (IMask/Cleave) NÃO FUNCIONAM com fill(). É OBRIGATÓRIO
+        limpar com Ctrl+A e digitar caractere por caractere via teclado.
+        """
+        valor_br = self._normalizar_decimal_ptbr(valor)
+        try:
+            # Foca e clica 2x para garantir foco
+            locator_element.scroll_into_view_if_needed(timeout=5000)
+            locator_element.click()
+            try:
+                locator_element.click(click_count=2, timeout=2000)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Seleciona TUDO e apaga (Ctrl+A, Delete)
+        try:
+            locator_element.press("Control+A")
+        except Exception:
+            pass
+        try:
+            locator_element.press("Delete")
+        except Exception:
+            pass
+        # Garantia adicional: tenta .fill('') para zerar buffer
+        try:
+            locator_element.fill("")
+        except Exception:
+            pass
+        try:
+            locator_element.press("Control+A")
+            locator_element.press("Backspace")
+        except Exception:
+            pass
+        # Digita lentamente caractere por caractere (mascara pega cada tecla)
+        locator_element.type(valor_br, delay=delay_ms)
+        return valor_br
+
     def _click_text(self, options_text, timeout=30000, exact=False):
         """Clica no PRIMEIRO elemento que contenha algum dos textos listados."""
         ctx = self._active_page()
@@ -429,12 +520,32 @@ class CalculadoraJurosCompostosPage(BasePage):
                 continue
         raise last_err or RuntimeError(f"Nenhum elemento encontrado com textos {options_text}")
 
-    def _fill_by_placeholder_label_or_nearby(self, valor, keywords, tipo="input"):
+    def _fill_by_placeholder_label_or_nearby(self, valor, keywords, tipo="input",
+                                              mascara=False, delay_ms=60):
         """
         Busca o input mais proximo de alguma keyword (label/placeholder).
+        Se mascara=True usa _preencher_com_mascara_br() (Ctrl+A + type char a char).
         """
         ctx = self._active_page()
         valor_str = str(valor)
+
+        def _aplicar_fill(el):
+            if mascara:
+                self._preencher_com_mascara_br(el, valor_str, delay_ms=delay_ms)
+            else:
+                try:
+                    el.click()
+                    try:
+                        el.fill(valor_str)
+                    except Exception:
+                        # fallback mascara mesmo se pedido fill() (pode ser mascara oculta)
+                        self._preencher_com_mascara_br(el, valor_str, delay_ms=delay_ms)
+                except Exception:
+                    self._preencher_com_mascara_br(el, valor_str, delay_ms=delay_ms)
+            return True
+
+        # 0) Metodo PRIORITARIO: ids/attrs da lista de seletores externos
+        # (aqui placeholder/label abaixo)
 
         # 1) por placeholder exato ou aproximado
         for kw in keywords:
@@ -445,8 +556,7 @@ class CalculadoraJurosCompostosPage(BasePage):
                         try:
                             el = loc.nth(i)
                             el.wait_for(state="visible", timeout=5000)
-                            el.click()
-                            el.fill(valor_str)
+                            _aplicar_fill(el)
                             return True
                         except Exception:
                             continue
@@ -462,8 +572,7 @@ class CalculadoraJurosCompostosPage(BasePage):
                         try:
                             el = loc.nth(i)
                             el.wait_for(state="visible", timeout=5000)
-                            el.click()
-                            el.fill(valor_str)
+                            _aplicar_fill(el)
                             return True
                         except Exception:
                             continue
@@ -486,8 +595,7 @@ class CalculadoraJurosCompostosPage(BasePage):
                         try:
                             el = loc.nth(i)
                             el.wait_for(state="visible", timeout=5000)
-                            el.click()
-                            el.fill(valor_str)
+                            _aplicar_fill(el)
                             return True
                         except Exception:
                             continue
@@ -521,51 +629,154 @@ class CalculadoraJurosCompostosPage(BasePage):
 
     def preencher_valor_inicial(self, valor):
         self._ensure_calculadora_context()
+        ctx = self._active_page()
+
+        # METODO PRINCIPAL: ID DIRETO (MAIS CONFIAVEL - Katalon confirmou!)
+        ids_prioridade = ['#valorEmprestimo', '#valorInicial']
+        for _id in ids_prioridade:
+            try:
+                el = ctx.locator(_id)
+                if el.count() > 0:
+                    try:
+                        for i in range(el.count()):
+                            try:
+                                el_i = el.nth(i)
+                                if el_i.is_visible():
+                                    self._preencher_com_mascara_br(el_i, valor, delay_ms=70)
+                                    return
+                            except Exception:
+                                continue
+                        self._preencher_com_mascara_br(el.first, valor, delay_ms=70)
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
         try:
             self._fill_by_placeholder_label_or_nearby(
                 valor,
-                ["Valor inicial", "Valor Inicial", "Valor", "Capital", "Principal",
-                 "Quanto você quer aplicar", "valor_inicial", "valor inicial",
-                 "Quanto você tem", "Montante inicial"],
+                ["Valor do Empréstimo", "Valor do Emprestimo", "Empréstimo",
+                 "Emprestimo", "Valor inicial", "Valor Inicial", "Valor",
+                 "Capital", "Principal", "Quanto você quer aplicar",
+                 "valor_inicial", "valor inicial", "Quanto você tem",
+                 "Montante inicial"],
+                mascara=True, delay_ms=70,
             )
         except Exception:
             locator = self._find_locator(self.INPUT_VALOR_INICIAL)
-            self.fill_input(locator, str(valor))
+            el = self._apply_locator(locator)
+            try:
+                self._preencher_com_mascara_br(el.first, valor, delay_ms=70)
+            except Exception:
+                self.fill_input(locator, str(valor))
 
     def preencher_aporte_mensal(self, valor):
         self._ensure_calculadora_context()
+        ctx = self._active_page()
+        try:
+            el = ctx.locator('#valorMensal')
+            if el.count() > 0:
+                for i in range(el.count()):
+                    try:
+                        if el.nth(i).is_visible():
+                            self._preencher_com_mascara_br(el.nth(i), valor, delay_ms=70)
+                            return
+                    except Exception:
+                        continue
+                try:
+                    self._preencher_com_mascara_br(el.first, valor, delay_ms=70)
+                    return
+                except Exception:
+                    pass
+        except Exception:
+            pass
         try:
             self._fill_by_placeholder_label_or_nearby(
                 valor,
                 ["Aporte mensal", "Aporte Mensal", "Aporte", "Mensal",
                  "Depósito mensal", "Contribuição mensal", "Contribuicao mensal",
                  "aporte_mensal", "parcela mensal", "Pagamento mensal"],
+                mascara=True, delay_ms=70,
             )
         except Exception:
             locator = self._find_locator(self.INPUT_APORTE_MENSAL)
-            self.fill_input(locator, str(valor))
+            el = self._apply_locator(locator)
+            try:
+                self._preencher_com_mascara_br(el.first, valor, delay_ms=70)
+            except Exception:
+                self.fill_input(locator, str(valor))
 
     def preencher_taxa_juros(self, taxa):
         self._ensure_calculadora_context()
+        ctx = self._active_page()
+        for _id in ['#taxaJurosDivida', '#taxaJurosInvest']:
+            try:
+                el = ctx.locator(_id)
+                if el.count() > 0:
+                    for i in range(el.count()):
+                        try:
+                            if el.nth(i).is_visible():
+                                self._preencher_com_mascara_br(el.nth(i), taxa, delay_ms=70)
+                                return
+                        except Exception:
+                            continue
+                    try:
+                        self._preencher_com_mascara_br(el.first, taxa, delay_ms=70)
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         try:
             self._fill_by_placeholder_label_or_nearby(
                 taxa,
                 ["Taxa de juros", "Taxa Juros", "Taxa", "Juros",
                  "Taxa anual", "Taxa mensal", "Percentual", "%",
                  "taxa_juros", "taxa de juros", "Selic", "Rentabilidade"],
+                mascara=True, delay_ms=70,
             )
         except Exception:
             locator = self._find_locator(self.INPUT_TAXA_JUROS)
-            self.fill_input(locator, str(taxa))
+            el = self._apply_locator(locator)
+            try:
+                self._preencher_com_mascara_br(el.first, taxa, delay_ms=70)
+            except Exception:
+                self.fill_input(locator, str(taxa))
 
     def preencher_periodo(self, periodo):
         self._ensure_calculadora_context()
+        ctx = self._active_page()
+        for _id in ['#prazoDivida', '#periodoInvest']:
+            try:
+                el = ctx.locator(_id)
+                if el.count() > 0:
+                    for i in range(el.count()):
+                        try:
+                            if el.nth(i).is_visible():
+                                el.nth(i).click()
+                                try:
+                                    el.nth(i).fill(str(periodo))
+                                except Exception:
+                                    self._preencher_com_mascara_br(el.nth(i), periodo, delay_ms=50)
+                                return
+                        except Exception:
+                            continue
+                    try:
+                        el.first.click()
+                        el.first.fill(str(periodo))
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         try:
             self._fill_by_placeholder_label_or_nearby(
                 periodo,
                 ["Período", "Periodo", "Prazo", "Tempo", "Meses", "Anos",
                  "Quantidade de meses", "periodo", "prazo", "tempo",
                  "Quantos meses", "Quantos anos"],
+                mascara=False,
             )
         except Exception:
             locator = self._find_locator(self.INPUT_PERIODO)
