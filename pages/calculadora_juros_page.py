@@ -5,27 +5,38 @@ class CalculadoraJurosCompostosPage(BasePage):
     URL = "https://blog.agibank.com.br/como-calcular-juros-compostos/"
 
     ABA_DIVIDA = [
+        'xpath=//*[@id="choiceScreen"]/div[1]/div[1]/span',
+        '#choiceScreen div:first-child div:first-child span',
+        '#choiceScreen span:has-text("Dívida")',
+        '#choiceScreen span:has-text("Divida")',
+        '[id="choiceScreen"] [id*="divida"]',
         'button:has-text("Dívida")',
         'a:has-text("Dívida")',
         'div[role="tab"]:has-text("Dívida")',
         'li:has-text("Dívida")',
         '[data-tab*="divida"]',
-        '[data-tab*="divida"]',
         '[aria-label*="Dívida"]',
         '.tab:has-text("Dívida")',
         '.nav-link:has-text("Dívida")',
+        'span:has-text("Dívida")',
+        'span:has-text("Divida")',
     ]
 
     ABA_INVESTIMENTO = [
+        'xpath=//*[@id="choiceScreen"]/div[2]/div[1]/span',
+        'xpath=//*[@id="choiceScreen"]/div[1]/div[2]/span',
+        '#choiceScreen span:has-text("Investimento")',
+        '#choiceScreen div:nth-child(2) div:nth-child(1) span',
+        '[id="choiceScreen"] [id*="investimento"]',
         'button:has-text("Investimento")',
         'a:has-text("Investimento")',
         'div[role="tab"]:has-text("Investimento")',
         'li:has-text("Investimento")',
         '[data-tab*="investimento"]',
-        '[data-tab*="investimento"]',
         '[aria-label*="Investimento"]',
         '.tab:has-text("Investimento")',
         '.nav-link:has-text("Investimento")',
+        'span:has-text("Investimento")',
     ]
 
     INPUT_VALOR_INICIAL = [
@@ -188,26 +199,17 @@ class CalculadoraJurosCompostosPage(BasePage):
         '.text-danger',
     ]
 
-    def _find_locator(self, options):
-        for locator in options:
-            try:
-                if self.page.locator(locator).count() > 0:
-                    return locator
-            except Exception:
-                continue
-        return options[0]
-
     def acessar_pagina(self):
         self.navigate(self.URL)
         self.wait_for_load()
 
     def selecionar_aba_divida(self):
-        locator = self._find_locator(self.ABA_DIVIDA)
+        locator = self._find_locator(self.ABA_DIVIDA, fallback_text="Dívida")
         self.click_element(locator)
         self.wait_for_load()
 
     def selecionar_aba_investimento(self):
-        locator = self._find_locator(self.ABA_INVESTIMENTO)
+        locator = self._find_locator(self.ABA_INVESTIMENTO, fallback_text="Investimento")
         self.click_element(locator)
         self.wait_for_load()
 
@@ -254,30 +256,34 @@ class CalculadoraJurosCompostosPage(BasePage):
                 pass
 
     def clicar_calcular(self):
-        locator = self._find_locator(self.BOTAO_CALCULAR)
+        locator = self._find_locator(self.BOTAO_CALCULAR, fallback_text="Calcular")
         self.click_element(locator)
         self.wait_for_load()
 
     def obter_resultado(self):
-        locator = self._find_locator(self.RESULTADO_MONTANTE)
-        if self.is_element_visible(locator, timeout=15000):
-            return self.get_text(locator)
+        raw = self._find_locator(self.RESULTADO_MONTANTE, fallback_text="R$")
+        if self.is_element_visible(raw, timeout=15000):
+            return self.get_text(raw)
         for loc in self.RESULTADO_MONTANTE:
             try:
-                if self.page.locator(loc).count() > 0 and self.page.locator(loc).first.is_visible():
-                    return self.page.locator(loc).first.inner_text().strip()
+                candidates = self._build_locator(loc)
+                for cand in candidates or []:
+                    if cand.count() > 0 and cand.first.is_visible():
+                        return cand.first.inner_text().strip()
             except Exception:
                 continue
         return ""
 
     def obter_mensagem_erro(self):
-        locator = self._find_locator(self.MENSAGEM_ERRO)
-        if self.is_element_visible(locator, timeout=10000):
-            return self.get_text(locator)
+        raw = self._find_locator(self.MENSAGEM_ERRO, fallback_text="obrigat")
+        if self.is_element_visible(raw, timeout=10000):
+            return self.get_text(raw)
         for loc in self.MENSAGEM_ERRO:
             try:
-                if self.page.locator(loc).count() > 0 and self.page.locator(loc).first.is_visible():
-                    return self.page.locator(loc).first.inner_text().strip()
+                candidates = self._build_locator(loc)
+                for cand in candidates or []:
+                    if cand.count() > 0 and cand.first.is_visible():
+                        return cand.first.inner_text().strip()
             except Exception:
                 continue
         return ""

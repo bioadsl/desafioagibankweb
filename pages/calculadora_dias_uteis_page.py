@@ -92,14 +92,14 @@ class CalculadoraDiasUteisPage(BasePage):
         '.mensagem-erro',
     ]
 
-    def _find_locator(self, options):
-        for locator in options:
-            try:
-                if self.page.locator(locator).count() > 0:
-                    return locator
-            except Exception:
-                continue
-        return options[0]
+    def marcar_checkbox(self, opcoes, marcar):
+        raw = self._find_locator(opcoes)
+        checkbox = self._apply_locator(raw)
+        checkbox.wait_for(state="visible")
+        if marcar and not checkbox.is_checked():
+            checkbox.check()
+        elif not marcar and checkbox.is_checked():
+            checkbox.uncheck()
 
     def acessar_pagina(self):
         self.navigate(self.URL)
@@ -114,57 +114,43 @@ class CalculadoraDiasUteisPage(BasePage):
         self.fill_input(locator, data)
 
     def marcar_sabado(self, marcar=True):
-        locator = self._find_locator(self.CHECKBOX_SABADO)
-        checkbox = self.page.locator(locator).first
-        checkbox.wait_for(state="visible")
-        if marcar and not checkbox.is_checked():
-            checkbox.check()
-        elif not marcar and checkbox.is_checked():
-            checkbox.uncheck()
+        self.marcar_checkbox(self.CHECKBOX_SABADO, marcar)
 
     def marcar_domingo(self, marcar=True):
-        locator = self._find_locator(self.CHECKBOX_DOMINGO)
-        checkbox = self.page.locator(locator).first
-        checkbox.wait_for(state="visible")
-        if marcar and not checkbox.is_checked():
-            checkbox.check()
-        elif not marcar and checkbox.is_checked():
-            checkbox.uncheck()
+        self.marcar_checkbox(self.CHECKBOX_DOMINGO, marcar)
 
     def marcar_feriados(self, marcar=True):
-        locator = self._find_locator(self.CHECKBOX_FERIADOS)
-        checkbox = self.page.locator(locator).first
-        checkbox.wait_for(state="visible")
-        if marcar and not checkbox.is_checked():
-            checkbox.check()
-        elif not marcar and checkbox.is_checked():
-            checkbox.uncheck()
+        self.marcar_checkbox(self.CHECKBOX_FERIADOS, marcar)
 
     def clicar_calcular(self):
-        locator = self._find_locator(self.BOTAO_CALCULAR)
+        locator = self._find_locator(self.BOTAO_CALCULAR, fallback_text="Calcular")
         self.click_element(locator)
         self.wait_for_load()
 
     def obter_resultado(self):
-        locator = self._find_locator(self.RESULTADO)
-        if self.is_element_visible(locator, timeout=15000):
-            return self.get_text(locator)
+        raw = self._find_locator(self.RESULTADO, fallback_text="dias úteis")
+        if self.is_element_visible(raw, timeout=15000):
+            return self.get_text(raw)
         for loc in self.RESULTADO:
             try:
-                if self.page.locator(loc).count() > 0 and self.page.locator(loc).first.is_visible():
-                    return self.page.locator(loc).first.inner_text().strip()
+                candidates = self._build_locator(loc)
+                for cand in candidates or []:
+                    if cand.count() > 0 and cand.first.is_visible():
+                        return cand.first.inner_text().strip()
             except Exception:
                 continue
         return ""
 
     def obter_mensagem_erro(self):
-        locator = self._find_locator(self.MENSAGEM_ERRO)
-        if self.is_element_visible(locator, timeout=10000):
-            return self.get_text(locator)
+        raw = self._find_locator(self.MENSAGEM_ERRO, fallback_text="obrigat")
+        if self.is_element_visible(raw, timeout=10000):
+            return self.get_text(raw)
         for loc in self.MENSAGEM_ERRO:
             try:
-                if self.page.locator(loc).count() > 0 and self.page.locator(loc).first.is_visible():
-                    return self.page.locator(loc).first.inner_text().strip()
+                candidates = self._build_locator(loc)
+                for cand in candidates or []:
+                    if cand.count() > 0 and cand.first.is_visible():
+                        return cand.first.inner_text().strip()
             except Exception:
                 continue
         return ""

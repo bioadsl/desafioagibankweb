@@ -1,3 +1,4 @@
+import re
 from pages.base_page import BasePage
 
 
@@ -22,6 +23,9 @@ class BlogAgiPage(BasePage):
 
     INPUT_PESQUISA = [
         'input[name="s"]',
+        'input.search-field',
+        'input[placeholder="Digite sua busca"]',
+        'input[placeholder*="Digite sua busca"]',
         'input[name="search"]',
         'input[id="search"]',
         'input[type="search"]',
@@ -85,34 +89,51 @@ class BlogAgiPage(BasePage):
         '.error-404',
     ]
 
-    def _find_locator(self, options):
-        for locator in options:
-            try:
-                if self.page.locator(locator).count() > 0:
-                    return locator
-            except Exception:
-                continue
-        return options[0]
-
     def acessar_pagina(self):
         self.navigate(self.URL)
         self.wait_for_load()
 
     def clicar_lupa(self):
-        locator = self._find_locator(self.BOTAO_LUPA)
-        self.click_element(locator)
+        locator = self._find_locator(self.BOTAO_LUPA, fallback_text="Pesquisar")
+        try:
+            self.click_element(locator)
+        except Exception:
+            try:
+                botao = self.page.get_by_role("button", name=re.compile(r"(?i)pesquisar|buscar|lupa|search"))
+                if botao.count() > 0:
+                    botao.first.click()
+            except Exception:
+                pass
 
     def preencher_campo_pesquisa(self, texto):
         locator = self._find_locator(self.INPUT_PESQUISA)
-        self.wait_for_element(locator, timeout=15000)
-        self.fill_input(locator, texto)
+        try:
+            self.wait_for_element(locator, timeout=15000)
+        except Exception:
+            pass
+        try:
+            self.fill_input(locator, texto)
+        except Exception:
+            try:
+                campo = self.page.get_by_role("searchbox", name=re.compile(r"(?i)pesquisar|buscar|search"))
+                if campo.count() > 0:
+                    campo.first.fill(texto)
+                else:
+                    self.page.keyboard.type(texto)
+            except Exception:
+                self.page.keyboard.type(texto)
 
     def submeter_pesquisa(self):
         locator = self._find_locator(self.BOTAO_SUBMIT_PESQUISA)
         try:
-            if self.page.locator(locator).count() > 0:
-                self.click_element(locator)
-            else:
+            candidates = self._build_locator(locator)
+            achou = False
+            for cand in candidates or []:
+                if cand.count() > 0 and cand.first.is_visible():
+                    cand.first.click()
+                    achou = True
+                    break
+            if not achou:
                 self.page.keyboard.press("Enter")
         except Exception:
             self.page.keyboard.press("Enter")
@@ -120,30 +141,43 @@ class BlogAgiPage(BasePage):
 
     def realizar_pesquisa(self, termo):
         self.clicar_lupa()
+        self.page.wait_for_timeout(400)
         self.preencher_campo_pesquisa(termo)
         self.submeter_pesquisa()
 
     def quantidade_resultados(self):
-        locator = self._find_locator(self.RESULTADOS_PESQUISA)
+        raw = self._find_locator(self.RESULTADOS_PESQUISA)
         try:
-            count = self.page.locator(locator).count()
-            return count
+            el = self._apply_locator(raw)
+            if "article" in raw.lower() or "results" in raw.lower() or "posts" in raw.lower():
+                return self.page.locator(raw).count()
+            return el.count()
         except Exception:
             return 0
 
     def obter_titulos_resultados(self):
-        locator = self._find_locator(self.RESULTADOS_PESQUISA)
+        raw = self._find_locator(self.RESULTADOS_PESQUISA)
         titulos = []
         try:
-            count = self.page.locator(locator).count()
+            artigos = self.page.locator(raw)
+            count = artigos.count()
             for i in range(min(count, 10)):
                 try:
-                    artigo = self.page.locator(locator).nth(i)
-                    titulo_locator = self._find_locator(self.TITULO_ARTIGO)
-                    if artigo.locator(titulo_locator).count() > 0:
-                        texto = artigo.locator(titulo_locator).first.inner_text().strip()
-                        if texto:
-                            titulos.append(texto)
+                    artigo = artigos.nth(i)
+                    titulo_raw = self._find_locator(self.TITULO_ARTIGO)
+                    titulo_cand = self._build_locator(titulo_raw)
+                    texto = ""
+                    for tc in titulo_cand or []:
+                        try:
+                            if artigo.locator(titulo_raw).count() > 0:
+                                texto = artigo.locator(titulo_raw).first.inner_text().strip()
+                                break
+                        except Exception:
+                            continue
+                    if not texto:
+                        texto = artigo.inner_text().strip().splitlines()[0].strip() if artigo.inner_text().strip() else ""
+                    if texto:
+                        titulos.append(texto)
                 except Exception:
                     continue
         except Exception:
@@ -156,15 +190,23 @@ class BlogAgiPage(BasePage):
         for titulo in resultados:
             if termo_lower in titulo.lower():
                 return True
-        page_text = self.page.inner_text("body").lower()
-        return termo_lower in page_text
+        try:
+            page_text = self.page.inner_text("body").lower()
+            return termo_lower in page_text
+        except Exception:
+            return False
 
     def verificar_mensagem_sem_resultado(self):
-        locator = self._find_locator(self.MENSAGEM_NENHUM_RESULTADO)
-        for loc in self.MENSAGEM_NENHUM_RESULTADO:
+        raw = self._find_locator(self.MENSAGEM_NENHUM_RESULTADO, fallback_text="Nenhum resultado")
+        for loc in [raw] + self.MENSAGEM_NENHUM_RESULTADO:
             try:
-                self.page.locator(loc).first.wait_for(state="visible", timeout=5000)
-                return True
+                candidates = self._build_locator(loc) if not loc.startswith("__text__:") else [self.page.get_by_text(loc[len("__text__:"):], exact=False)]
+                for cand in candidates or []:
+                    try:
+                        cand.first.wait_for(state="visible", timeout=5000)
+                        return True
+                    except Exception:
+                        continue
             except Exception:
                 continue
         return False
