@@ -67,6 +67,72 @@ class TestCalculadoraJurosCompostos:
     @pytest.mark.juros_compostos
     @pytest.mark.cenario_feliz
     @pytest.mark.divida
+    @pytest.mark.katalon_golden
+    def test_calcular_divida_katalon_golden_cem_doismeio_vintequatro(self):
+        """
+        Cenário GOLDEN extraído diretamente da gravação Katalon Recorder
+        do usuário, com asserts exatos.
+
+        Dados Katalon:
+          - Valor do Empréstimo ....... R$ 10.000,00
+          - Taxa de juros .............. 2,50% a.m. (mensal)
+          - Prazo ...................... 24 meses
+
+        Resultado esperado (asserts Katalon):
+          - valorTotal ............... R$ 13.419,08
+          - valorEmprestimoResult .... R$ 10.000,00
+          - totalJuros ............... R$ 3.419,08
+          - valorParcela ............. R$ 559,13
+          - numeroParcelas ........... 24x
+          - taxaTextoDivida .......... 2,50% a.m.
+        """
+        self.calc_page.selecionar_aba_divida()
+        self.calc_page.preencher_valor_inicial("10000")  # R$ 10.000,00
+        self.calc_page.preencher_taxa_juros("2.5")        # 2,5% a.m.
+        self.calc_page.selecionar_periodicidade_taxa("mensal")
+        self.calc_page.preencher_periodo("24")            # 24 meses
+        self.calc_page.selecionar_unidade_periodo("meses")
+        self.calc_page.clicar_calcular()
+
+        resultado = self.calc_page.obter_resulado_divida_completo()
+
+        # --- Valores exatos (capturados no Katalon) ---
+        assert resultado["valor_total"]         == "R$ 13.419,08", (
+            f"Valor total divergente: esperado R$ 13.419,08, recebido '{resultado['valor_total']}'"
+        )
+        assert resultado["valor_emprestimo"]    == "R$ 10.000,00", (
+            f"Valor empréstimo divergente: esperado R$ 10.000,00, recebido '{resultado['valor_emprestimo']}'"
+        )
+        assert resultado["total_juros"]         == "R$ 3.419,08", (
+            f"Total juros divergente: esperado R$ 3.419,08, recebido '{resultado['total_juros']}'"
+        )
+        assert resultado["valor_parcela"]       == "R$ 559,13", (
+            f"Valor parcela divergente: esperado R$ 559,13, recebido '{resultado['valor_parcela']}'"
+        )
+        assert resultado["numero_parcelas"]     == "24x", (
+            f"Núm. parcelas divergente: esperado '24x', recebido '{resultado['numero_parcelas']}'"
+        )
+        assert resultado["taxa_texto"]          == "2,50% a.m.", (
+            f"Taxa formatada divergente: esperado '2,50% a.m.', recebido '{resultado['taxa_texto']}'"
+        )
+
+        # --- Sinais vitais (checagens fracas de sanidade) ---
+        total_juros_num = self._extrair_valor_numerico(resultado["total_juros"])
+        val_emp_num   = self._extrair_valor_numerico(resultado["valor_emprestimo"])
+        val_tot_num   = self._extrair_valor_numerico(resultado["valor_total"])
+        parcela_num   = self._extrair_valor_numerico(resultado["valor_parcela"])
+        parcela_calc  = round(val_tot_num / 24, 2)
+        assert total_juros_num > 0, "Juros deve ser positivo em uma dívida"
+        assert abs(val_tot_num - (val_emp_num + total_juros_num)) < 0.10, (
+            "Valor total deve ser igual a valor empréstimo + juros (tolerância R$ 0,10)"
+        )
+        assert abs(parcela_num - parcela_calc) < 0.10, (
+            f"Parcela informada ({parcela_num}) não bate com valor total / 24 ({parcela_calc})"
+        )
+
+    @pytest.mark.juros_compostos
+    @pytest.mark.cenario_feliz
+    @pytest.mark.divida
     def test_calcular_juros_compostos_divida(self):
         self.calc_page.calcular_divida(
             valor_inicial="2000",

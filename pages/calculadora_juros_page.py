@@ -11,6 +11,7 @@ class CalculadoraJurosCompostosPage(BasePage):
     IFRAME_URL_KEYWORDS = ["calculadora_juros_compostos", "v4.html"]
 
     ABA_DIVIDA = [
+        'xpath=//div[@id=\'choiceScreen\']/div/div/span',
         'xpath=//*[@id="choiceScreen"]/div[1]/div[1]/span',
         '#choiceScreen > div.choice-cards > div.choice-card:first-child',
         '#choiceScreen > div.choice-cards > div.choice-card:first-child > div.choice-title',
@@ -183,6 +184,8 @@ class CalculadoraJurosCompostosPage(BasePage):
     ]
 
     BOTAO_CALCULAR = [
+        "xpath=//button[@onclick='calcularDivida()']",
+        "xpath=//button[@onclick='calcularInvestimento()']",
         '#formDivida button',
         '#formInvestimento button',
         'button:has-text("Calcular Agora")',
@@ -205,6 +208,12 @@ class CalculadoraJurosCompostosPage(BasePage):
     ]
 
     RESULTADO_MONTANTE = [
+        '#valorTotal',
+        '#valorEmprestimoResult',
+        '#totalJuros',
+        '#valorParcela',
+        '#numeroParcelas',
+        '#taxaTextoDivida',
         '#resultInvestimento',
         '#resultDivida',
         '#resultInvestimento .result-details',
@@ -236,6 +245,13 @@ class CalculadoraJurosCompostosPage(BasePage):
         '.valor-total',
         '.valor_total',
     ]
+
+    RESULTADO_DIVIDA_VALOR_TOTAL = ['#valorTotal']
+    RESULTADO_DIVIDA_VALOR_EMPRESTIMO = ['#valorEmprestimoResult']
+    RESULTADO_DIVIDA_TOTAL_JUROS = ['#totalJuros']
+    RESULTADO_DIVIDA_VALOR_PARCELA = ['#valorParcela']
+    RESULTADO_DIVIDA_NUMERO_PARCELAS = ['#numeroParcelas']
+    RESULTADO_DIVIDA_TAXA_TEXTO = ['#taxaTextoDivida']
 
     MENSAGEM_ERRO = [
         'div[class*="erro"]',
@@ -698,6 +714,64 @@ class CalculadoraJurosCompostosPage(BasePage):
             except Exception:
                 continue
         return ""
+
+    # ======================================================================
+    # CAMPOS DE RESULTADO ESPECÍFICOS DA DIVIDA (capturados via Katalon)
+    # ======================================================================
+    def _obter_campo_especifico(self, lista_ids, timeout=15000):
+        self._ensure_calculadora_context()
+        ctx = self._active_page()
+        for loc_id in lista_ids:
+            try:
+                loc = ctx.locator(loc_id)
+                if loc.count() > 0:
+                    try:
+                        loc.first.wait_for(state="visible", timeout=timeout)
+                    except Exception:
+                        pass
+                    txt = (loc.first.inner_text() or loc.first.input_value() or "").strip()
+                    if txt:
+                        return txt
+            except Exception:
+                continue
+        # fallback usando BasePage
+        raw = self._find_locator(lista_ids)
+        try:
+            if self.is_element_visible(raw, timeout=timeout):
+                return self.get_text(raw)
+        except Exception:
+            pass
+        return ""
+
+    def obter_valor_total(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_VALOR_TOTAL)
+
+    def obter_valor_emprestimo_resultado(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_VALOR_EMPRESTIMO)
+
+    def obter_total_juros(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_TOTAL_JUROS)
+
+    def obter_valor_parcela(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_VALOR_PARCELA)
+
+    def obter_numero_parcelas(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_NUMERO_PARCELAS)
+
+    def obter_taxa_texto_divida(self):
+        return self._obter_campo_especifico(self.RESULTADO_DIVIDA_TAXA_TEXTO)
+
+    # Helpers de alto nivel: retorna dict completo do resultado divida
+    def obter_resulado_divida_completo(self):
+        """Retorna dict com todos os campos de resultado da divida"""
+        return {
+            "valor_total": self.obter_valor_total(),
+            "valor_emprestimo": self.obter_valor_emprestimo_resultado(),
+            "total_juros": self.obter_total_juros(),
+            "valor_parcela": self.obter_valor_parcela(),
+            "numero_parcelas": self.obter_numero_parcelas(),
+            "taxa_texto": self.obter_taxa_texto_divida(),
+        }
 
     def calcular_investimento(self, valor_inicial, aporte_mensal, taxa_juros, periodo,
                                periodicidade_taxa="mensal", unidade_periodo="meses"):
