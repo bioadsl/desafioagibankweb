@@ -55,6 +55,7 @@ cover/
 htmlcov/
 .hypothesis/
 reports/screenshots/
+reports/debug_divida/
 reports/*.html
 reports/*.zip
 reports/*.json
@@ -63,7 +64,10 @@ reports/*.md
 reports/*.png
 reports/*.jpg
 reports/*.jpeg
+reports/*.log
+reports/*.out
 reports/auditoria_*
+reports/trace/
 !reports/.gitkeep
 
 # ====== SISTEMA DE AUDITORIA - LOGS E CHAVES CRIPTOGRAFIA ======
