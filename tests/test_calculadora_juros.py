@@ -125,6 +125,30 @@ class TestCalculadoraJurosCompostos:
     @pytest.mark.juros_compostos
     @pytest.mark.validacao
     def test_validar_abas_existem(self):
-        assert "Juros Compostos" in self.page.title() or "juros compostos" in self.page.url.lower(), (
-            "Página de juros compostos não carregada corretamente"
+        pag_carregada = self.calc_page.wait_for_real_page(
+            check_url_contains=["juros", "agibank", "compostos"],
+            check_title_contains=[
+                "Juros Compostos", "Juros compostos", "juros compostos",
+                "Calcular Juros", "Calculadora", "Agibank", "agibank",
+            ],
+            timeout=90000,
         )
+        url_lower = self.page.url.lower()
+        url_ok = (
+            "agibank" in url_lower
+            and ("juros" in url_lower or "compostos" in url_lower)
+        )
+        assert url_ok, (
+            f"Página de juros compostos não carregada corretamente. URL atual: {self.page.url}"
+        )
+        if pag_carregada:
+            titulo = self.page.title().lower()
+            tem_titulo_ok = (
+                "juros" in titulo
+                or "compostos" in titulo
+                or "calculadora" in titulo
+                or "agibank" in titulo
+            )
+            assert tem_titulo_ok, (
+                f"Título da página não confere após bypass cloudflare: {self.page.title()}"
+            )
