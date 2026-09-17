@@ -1,0 +1,74 @@
+name: E2E Tests - Desafio QA Agibank
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  HEADLESS: 'true'
+  SLOW_MO: '0'
+
+jobs:
+  e2e-tests:
+    name: Executar Testes E2E com Playwright + Pytest
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Instalar dependências Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Instalar navegadores e dependências do Playwright
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Criar diretório de relatórios
+        run: |
+          mkdir -p reports/screenshots
+
+      - name: Executar testes com Pytest
+        id: test_run
+        continue-on-error: true
+        run: |
+          export HEADLESS=true
+          export SLOW_MO=0
+          python -m pytest tests/ \
+            -v \
+            --tb=short \
+            --html=reports/report.html \
+            --self-contained-html \
+            --capture=tee-sys
+
+      - name: Verificar status dos testes
+        if: steps.test_run.outcome == 'failure'
+        run: echo "Testes falharam - artefatos serão salvos"
+
+      - name: Salvar relatórios e artefatos (sempre)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-e2e-tests
+          path: |
+            reports/report.html
+            reports/screenshots/
+            reports/trace.zip
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Falhar o job se testes falharam
+        if: steps.test_run.outcome == 'failure'
+        run: exit 1

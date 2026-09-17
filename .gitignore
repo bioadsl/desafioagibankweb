@@ -1,0 +1,48 @@
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.egg
+
+# === Ambientes Virtuais ===
+venv/
+env/
+ENV/
+.venv/
+.env
+
+# === PyTest ===
+.pytest_cache/
+reports/screenshots/
+reports/*.html
+reports/*.zip
+!reports/.gitkeep
+
+# === Playwright ===
+playwright/.cache/
+
+# === IDEs ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Logs ===
+*.log
+logs/
+
+# === Variáveis de Ambiente ===
+.env.local
+.env.*.local
