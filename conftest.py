@@ -273,8 +273,6 @@ def _overlay_screenshot(item, rep):
                     rep.extras.append(pytest_html.extras.image(src))
                 except Exception:
                     pass
-    except Exception:
-        pass
     except Exception as _e:
         try:
             import sys
