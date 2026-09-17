@@ -11,11 +11,14 @@ env:
   PYTHON_VERSION: '3.11'
   HEADLESS: 'true'
   SLOW_MO: '0'
+  # Para auditoria: identificar usuario/IP no ambiente CI
+  AUDIT_USER_ID: "github-actions[bot]@${{ github.run_id }}"
+  AUDIT_IP_ORIGEM: "10.0.0.${{ github.run_number }}"
 
 jobs:
   e2e-tests:
     name: Executar Testes E2E com Playwright + Pytest
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout do código
@@ -32,13 +35,62 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: (Workaround compatibilidade Ubuntu 24.04/Noble) libasound2 → libasound2t64
+        continue-on-error: true
+        run: |
+          # ==========================================================================
+          # Workaround para Ubuntu 24.04 (Noble Numbat):
+          # Playwright < 1.44 pede pacote libasound2, que virou virtual package.
+          # O pacote real agora chama libasound2t64 (transicao lib64 time_t 64bits).
+          # Caso algum runner seja Noble, criamos um pacote stub .deb dummy via equivs,
+          # ou simplesmente linkamos as bibliotecas compartilhadas e fazemos um
+          # "dummy" com dpkg divert. Para ubuntu-22.04 o step todo e pulado.
+          # ==========================================================================
+          UBUNTU_CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          echo "Ubuntu codename detectado: $UBUNTU_CODENAME"
+          if [ "$UBUNTU_CODENAME" = "noble" ] || [ "$UBUNTU_CODENAME" = "oracular" ]; then
+            echo "[INFO] Ubuntu 24.04+ detectado. Aplicando workaround libasound2 -> libasound2t64."
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends \
+              libasound2t64 libdbus-1-3 libexpat1 libfontconfig1 libgbm1 libgcc1 \
+              libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libx11-6 libx11-xcb1 \
+              libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 \
+              libxi6 libxkbcommon0 libxrandr2 libxrender1 libxshmfence1 libxtst6 \
+              fonts-liberation fonts-dejavu-core
+            # Garante que /usr/lib/x86_64-linux-gnu/libasound.so.2 exista
+            if [ ! -f /usr/lib/x86_64-linux-gnu/libasound.so.2 ]; then
+              sudo ln -sf /usr/lib/x86_64-linux-gnu/libasound.so.2.0.0 \
+                        /usr/lib/x86_64-linux-gnu/libasound.so.2 2>/dev/null || true
+              # Ultimo recurso: busca qualquer libasound instalada
+              ALT=$(find /usr/lib -name 'libasound*' -type f 2>/dev/null | head -n 1)
+              if [ -n "$ALT" ] && [ ! -f /usr/lib/x86_64-linux-gnu/libasound.so.2 ]; then
+                sudo ln -sf "$ALT" /usr/lib/x86_64-linux-gnu/libasound.so.2
+              fi
+            fi
+          else
+            echo "[INFO] Ubuntu $UBUNTU_CODENAME. Nenhum workaround necessario."
+          fi
+
       - name: Instalar navegadores e dependências do Playwright
         run: |
-          python -m playwright install --with-deps chromium
+          # Forca playwright a nao instalar libasound2 via apt novamente, caso
+          # ja tenhamos aplicado o workaround (Ubuntu 24.04). Para 22.04 nada muda.
+          UBUNTU_CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+          if [ "$UBUNTU_CODENAME" = "noble" ] || [ "$UBUNTU_CODENAME" = "oracular" ]; then
+            # --with-deps liga apt-get; workaround previamente instalado garante deps
+            # Se pacote libasound2 virtual falhar, falhamos com instalacao sem deps
+            # do apt; browsers (do Playwright) ja incluem suas libs estaticas.
+            python -m playwright install chromium || \
+            python -m playwright install --with-deps chromium || \
+            true
+          else
+            python -m playwright install --with-deps chromium
+          fi
 
       - name: Criar diretório de relatórios
         run: |
-          mkdir -p reports/screenshots
+          mkdir -p reports/screenshots reports/auditoria/data/keys reports/auditoria/data
+          touch reports/.gitkeep reports/auditoria/data/.gitkeep reports/auditoria/data/keys/.gitkeep
 
       - name: Executar testes com Pytest
         id: test_run
@@ -53,11 +105,20 @@ jobs:
             --self-contained-html \
             --capture=tee-sys
 
+      - name: (Opcional) Exportar JSON auditoria (últimos 7 dias)
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f reports/auditoria/auditoria_consultar.py ]; then
+            python reports/auditoria/auditoria_consultar.py --ultimos-dias 7 --json > reports/auditoria_ci_ultimos_7d.json || true
+          fi
+
       - name: Verificar status dos testes
         if: steps.test_run.outcome == 'failure'
         run: echo "Testes falharam - artefatos serão salvos"
 
       - name: Salvar relatórios e artefatos (sempre)
+        id: upload_artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -66,8 +127,51 @@ jobs:
             reports/report.html
             reports/screenshots/
             reports/trace.zip
+            reports/*.json
+            reports/auditoria_*.json
+            reports/RELATORIO_*.md
           retention-days: 14
           if-no-files-found: ignore
+
+      - name: 📑 Exibir como acessar os relatórios (Summary do Job)
+        if: always()
+        run: |
+          cat <<'MD_EOF' >> "$GITHUB_STEP_SUMMARY"
+          # 🔍 Como visualizar os relatórios de teste (GITHUB ACTIONS)
+
+          Os relatórios **não são commitados no Git** (conforme `.gitignore`).
+          Em vez disso, são salvos como **Artifacts** do GitHub Actions por 14 dias.
+
+          ## 🚀 Passo a Passo
+
+          1. **Role a página ATÉ O FINAL** desta tela (Summary deste Job).
+          2. Na seção **⚙️ Artifacts** (canto inferior direito), clique no artefato:
+             > **`relatorios-e2e-tests`**
+          3. O GitHub baixará um arquivo ZIP com o mesmo nome.
+          4. **Extraia o ZIP** em sua máquina local.
+          5. Abra o arquivo **`report.html`** no seu navegador (Chrome, Edge, Firefox).
+
+          ## 📦 Conteúdo do ZIP `relatorios-e2e-tests`
+
+          | Arquivo/Pasta       | O que contém?                                                                 |
+          |---------------------|-------------------------------------------------------------------------------|
+          | `report.html`       | **Relatório consolidado principal** (todos os testes, com detalhes e links)  |
+          | `screenshots/`      | Screenshots de **testes que FALHARAM** (nome do arquivo = nome do teste)     |
+          | `trace.zip`         | Playwright Trace Viewer (ver cada comando + snapshot DOM + rede)             |
+          | `auditoria_ci_*.json`| (Opcional) Export JSON do Sistema de Auditoria de Logs (últimos 7 dias)       |
+
+          ## 💡 Dicas úteis
+
+          - **Trace Viewer online (sem instalar nada):**  
+            Acesse 👉 **https://trace.playwright.dev/** e arraste `trace.zip`
+
+          - **Ver logs brutos do pytest:**  
+            Role esta página para cima → seção **"Run tests" → Passo "Executar testes com Pytest"** → aba `Logs`.
+
+          - **Executar localmente (1 clique):**  
+            Clone o repo → `cd desafioagibank` → duplo clique em:  
+            `Caso_1_Gerar_Relatorio_Novo.cmd` (Windows) ou execute os passos do README.
+          MD_EOF
 
       - name: Falhar o job se testes falharam
         if: steps.test_run.outcome == 'failure'

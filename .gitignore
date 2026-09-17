@@ -57,7 +57,28 @@ htmlcov/
 reports/screenshots/
 reports/*.html
 reports/*.zip
+reports/*.json
+reports/*.txt
+reports/*.md
+reports/*.png
+reports/*.jpg
+reports/*.jpeg
+reports/auditoria_*
 !reports/.gitkeep
+
+# ====== SISTEMA DE AUDITORIA - LOGS E CHAVES CRIPTOGRAFIA ======
+# NUNCA commitar: chaves privadas Fernet, dados brutos auditoria, DBs SQLite
+reports/auditoria/data/keys/*.key
+reports/auditoria/data/*.jsonl
+reports/auditoria/data/*.db
+reports/auditoria/data/*.sqlite3
+reports/auditoria/relatorios_extraidos/*
+reports/auditoria/_*.py
+!reports/auditoria/data/.gitkeep
+
+# Chaves de ambiente com dados sensiveis (usuarios, senhas auditoria)
+.env.auditoria
+.secret*
 
 # === Playwright ===
 playwright/.cache/
